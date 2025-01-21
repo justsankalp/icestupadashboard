@@ -4,13 +4,37 @@ import plotly.express as px
 import requests
 import pandas as pd
 import numpy as np
-import onnxruntime as ort
+import torch
+import torch.nn as nn
 from sklearn.preprocessing import StandardScaler
 from datetime import datetime
-import os
 
 # --------------------------
-# Preprocessing and Model Setup
+# Autoencoder Model
+# --------------------------
+
+class Autoencoder(nn.Module):
+    def __init__(self, input_dim):
+        super(Autoencoder, self).__init__()
+        self.encoder = nn.Sequential(
+            nn.Linear(input_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, 32),
+            nn.ReLU()
+        )
+        self.decoder = nn.Sequential(
+            nn.Linear(32, 64),
+            nn.ReLU(),
+            nn.Linear(64, input_dim)
+        )
+
+    def forward(self, x):
+        encoded = self.encoder(x)
+        decoded = self.decoder(encoded)
+        return decoded
+
+# --------------------------
+# Preprocessing and Model Loading
 # --------------------------
 
 # Define feature names
@@ -21,42 +45,14 @@ scaler = StandardScaler()
 scaler.mean_ = np.array([1.61401178, -7.11591429, 43.1693017, 1.10039844, -7.54093996])
 scaler.scale_ = np.array([1.57396511, 4.15318914, 18.77094551, 0.68505492, 4.60274569])
 
-# Load the ONNX model
-onnx_model_path = "autoencoder_model.onnx"
-if not os.path.exists(onnx_model_path):
-    raise FileNotFoundError(f"ONNX model not found at path: {onnx_model_path}")
-
-ort_session = ort.InferenceSession(onnx_model_path)
+# Load the trained Autoencoder model
+model = Autoencoder(len(features))
+model.load_state_dict(torch.load("autoencoder_model.pth"))
+model.eval()
 
 # Load precomputed training reconstruction errors
-training_errors_file = "training_errors.npy"
-if not os.path.exists(training_errors_file):
-    raise FileNotFoundError(f"Training errors file not found at path: {training_errors_file}")
-
-training_errors = np.load(training_errors_file)
+training_errors = np.load("training_errors.npy")
 threshold = np.percentile(training_errors, 95)
-
-# --------------------------
-# Evaluate Sample Function
-# --------------------------
-
-def evaluate_sample(sample_input):
-    """
-    Evaluate if a sample is an anomaly and identify feature contributions.
-    """
-    sample_df = pd.DataFrame([sample_input])
-    sample_scaled = scaler.transform(sample_df[features].values).astype(np.float32)
-
-    # Run ONNX model
-    outputs = ort_session.run(None, {"input": sample_scaled})
-    reconstruction = np.array(outputs[0])
-    reconstruction_error = (sample_scaled - reconstruction).flatten()
-
-    total_error = np.mean(reconstruction_error ** 2)
-    anomaly = int(total_error > threshold)
-    feature_contributions = dict(zip(features, reconstruction_error))
-
-    return anomaly, feature_contributions
 
 # --------------------------
 # Database Setup
@@ -83,6 +79,28 @@ CREATE TABLE IF NOT EXISTS realtime_data (
 conn.commit()
 
 # --------------------------
+# Evaluate Sample Function
+# --------------------------
+
+def evaluate_sample(sample_input):
+    """
+    Evaluate if a sample is an anomaly and identify feature contributions.
+    """
+    sample_df = pd.DataFrame([sample_input])
+    sample_scaled = scaler.transform(sample_df[features].values)
+    sample_tensor = torch.tensor(sample_scaled, dtype=torch.float32)
+
+    with torch.no_grad():
+        reconstruction = model(sample_tensor)
+        reconstruction_error = (sample_tensor - reconstruction).numpy().flatten()
+
+    total_error = np.mean(reconstruction_error ** 2)
+    anomaly = int(total_error > threshold)
+    feature_contributions = dict(zip(features, reconstruction_error))
+
+    return anomaly, feature_contributions
+
+# --------------------------
 # Dash Application
 # --------------------------
 
@@ -99,6 +117,10 @@ def clear_database():
             print("Database cleared successfully.")
     except Exception as e:
         print(f"Error clearing database: {e}")
+
+# --------------------------
+# Dash Application
+# --------------------------
 
 app = Dash(__name__)
 app.title = "Ice Stupa Viewer"
@@ -151,6 +173,8 @@ app.layout = html.Div(
         ),
     ]
 )
+
+# def max_contrib()
 
 @app.callback(
     [Output("valve-state-dropdown", "options"),
@@ -223,4 +247,4 @@ def update_real_time_values(n_intervals, selected_features, selected_valve_state
 
 if __name__ == "__main__":
     clear_database()  # Clear the database before starting the app
-    app.run(debug=True, host="0.0.0.0", port=8050)
+    app.run(debug=True)
