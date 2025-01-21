@@ -4,7 +4,7 @@ import pandas as pd
 app = Flask(__name__)
 
 # Load the dataset
-df = pd.read_csv('/home/sankalpkarthi/Documents/Ice Stupa/game/dash/merge.csv')  # Replace with the actual path to your CSV file
+df = pd.read_csv('./merge.csv')  # Replace with the actual path to your CSV file
 
 # Global variable to keep track of the current row
 current_index = 0
