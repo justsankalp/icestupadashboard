@@ -297,13 +297,11 @@ def update_processed_data(n_intervals):
     try:
         # Call process_data every hour
         output = process_data()
-        return f"Last Message at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} from team HIAL\n{output}"
+        # return f"Last Message at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} from team HIAL\n{output}"
+        return f"{output}\nfrom team HIAL with 💗"
     except Exception as e:
         return f"Error processing data: {str(e)}"
 
 if __name__ == "__main__":
     clear_database()  # Clear the database before starting the app
     app.run(debug=True)
-
-
-
